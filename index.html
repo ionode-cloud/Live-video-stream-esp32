@@ -20,7 +20,7 @@
 
         .container {
             max-width: 800px;
-            margin: 0 auto;
+            margin: 50px auto 0;
             background: white;
             padding: 30px;
             border-radius: 10px;
@@ -77,6 +77,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            position: relative;
         }
 
         #videoStream {
@@ -90,6 +91,13 @@
             color: white;
             text-align: center;
             z-index: 10;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.5);
         }
 
         .controls {
@@ -131,30 +139,31 @@
             text-align: center;
             font-weight: bold;
             margin-top: 10px;
+            border: 1px solid #ddd;
         }
 
         .status.connected {
             background: #d4edda;
             color: #155724;
-            border: 1px solid #c3e6cb;
+            border-color: #c3e6cb;
         }
 
         .status.disconnected {
             background: #f8d7da;
             color: #721c24;
-            border: 1px solid #f5c6cb;
+            border-color: #f5c6cb;
         }
 
         .status.buffering {
             background: #fff3cd;
             color: #856404;
-            border: 1px solid #ffeaa7;
+            border-color: #ffeaa7;
         }
 
         .status.error {
             background: #f8d7da;
             color: #721c24;
-            border: 1px solid #f5c6cb;
+            border-color: #f5c6cb;
         }
 
         .share-url {
@@ -171,7 +180,7 @@
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
-                margin: 10px;
+                margin: 20px 10px 0;
             }
             
             .ip-input {
@@ -226,9 +235,7 @@
         <div id="shareURL" class="share-url"></div>
     </div>
 
-    <!-- Keep your original JavaScript unchanged -->
     <script>
-        // Your existing JavaScript code here (unchanged)
         class ESP32VideoStreamer {
             constructor() {
                 this.video = document.getElementById('videoStream');
@@ -245,6 +252,8 @@
                 this.mediaSource = null;
                 this.sourceBuffer = null;
                 this.isStreaming = false;
+                this.bufferQueue = [];
+                this.isBuffering = false;
 
                 this.init();
             }
@@ -283,7 +292,13 @@
 
                 this.video.addEventListener('stalled', () => {
                     if (this.isStreaming) {
-                        setTimeout(() => this.fetchStreamData(this.streamUrl), 2000);
+                        this.handleBufferStall();
+                    }
+                });
+
+                this.video.addEventListener('waiting', () => {
+                    if (this.isStreaming) {
+                        this.updateStatus('buffering', ' Buffering...');
                     }
                 });
             }
@@ -294,7 +309,7 @@
                     this.esp32IP = ip;
                     localStorage.setItem('esp32_ip', ip);
                     this.updateShareURL();
-                    this.updateStatus('disconnected', `✅ IP saved: ${ip}`);
+                    this.updateStatus('disconnected', ` IP saved: ${ip}`);
                 } else {
                     alert('Invalid IP format! Use: 192.168.1.100');
                 }
@@ -319,7 +334,7 @@
                     this.startBtn.disabled = true;
                     this.stopBtn.disabled = false;
                     this.isStreaming = true;
-                    this.loading.style.display = 'block';
+                    this.loading.style.display = 'flex';
                     this.updateStatus('buffering', `🔄 Connecting to ${this.esp32IP}...`);
 
                     this.mediaSource = new MediaSource();
@@ -343,17 +358,29 @@
                     this.sourceBuffer.mode = 'sequence';
                     
                     this.sourceBuffer.addEventListener('updateend', () => {
-                        if (!this.sourceBuffer.updating && this.mediaSource.readyState === 'open') {
-                            this.fetchStreamData();
-                        }
+                        this.isBuffering = false;
+                        this.processBufferQueue();
                     });
 
+                    this.sourceBuffer.addEventListener('error', () => {
+                        console.error('SourceBuffer error');
+                        this.handleBufferError();
+                    });
+
+                    // Start fetching with buffering
                     this.fetchStreamData();
                     this.updateStatus('connected', `🟢 Live from ${this.esp32IP}`);
 
                 } catch (e) {
                     console.error('SourceBuffer error:', e);
                     this.handleError('Video codec not supported');
+                }
+            }
+
+            processBufferQueue() {
+                if (this.bufferQueue.length > 0 && !this.sourceBuffer.updating) {
+                    const data = this.bufferQueue.shift();
+                    this.sourceBuffer.appendBuffer(data);
                 }
             }
 
@@ -370,19 +397,47 @@
                     }
 
                     const arrayBuffer = await response.arrayBuffer();
-                    if (this.sourceBuffer.updating || !this.mediaSource) return;
+                    
+                    // Buffer management with queue
+                    if (this.sourceBuffer.updating || this.isBuffering) {
+                        if (this.bufferQueue.length < 5) { // Limit queue size
+                            this.bufferQueue.push(arrayBuffer);
+                        }
+                        return;
+                    }
 
+                    this.isBuffering = true;
                     this.sourceBuffer.appendBuffer(arrayBuffer);
+
                 } catch (error) {
                     console.error('Stream fetch error:', error);
                     if (this.isStreaming) {
-                        setTimeout(() => this.fetchStreamData(), 2000);
+                        setTimeout(() => this.fetchStreamData(), 1000);
                     }
                 }
             }
 
+            handleBufferStall() {
+                this.updateStatus('buffering', '🔄 Reconnecting stream...');
+                setTimeout(() => {
+                    if (this.isStreaming) {
+                        this.fetchStreamData();
+                    }
+                }, 1500);
+            }
+
+            handleBufferError() {
+                this.updateStatus('error', 'Buffer error - reconnecting...');
+                setTimeout(() => {
+                    if (this.isStreaming) {
+                        this.startStream();
+                    }
+                }, 3000);
+            }
+
             stopStream() {
                 this.isStreaming = false;
+                this.bufferQueue = [];
                 this.resetControls();
                 
                 if (this.mediaSource && this.mediaSource.readyState === 'open') {
