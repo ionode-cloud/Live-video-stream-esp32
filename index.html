@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Video Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 2em;
+        }
+
+        .ip-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        #esp32IP {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            width: 200px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+
+        .btn-save {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-save:hover {
+            background: #0056b3;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .loading {
+            position: absolute;
+            color: white;
+            text-align: center;
+            z-index: 10;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn-start {
+            background: #28a745;
+            color: white;
+            padding: 12px 24px;
+        }
+
+        .btn-start:hover:not(:disabled) {
+            background: #218838;
+        }
+
+        .btn-stop {
+            background: #dc3545;
+            color: white;
+            padding: 12px 24px;
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: #c82333;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.buffering {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .share-url {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 14px;
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+            
+            .ip-input {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            #esp32IP {
+                width: 250px;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 200px;
+            }
+            
+            .video-container {
+                height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Live Stream</h1>
+        
+        <div class="ip-input">
+            <input type="text" id="esp32IP" placeholder="192.168.1.100" maxlength="15">
+            <button class="btn btn-save" id="saveIP">Save IP</button>
+        </div>
+
+        <div class="video-container">
+            <video id="videoStream" autoplay muted playsinline></video>
+            <div class="loading" id="loadingIndicator">
+                <div>Ready to connect...</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" class="btn btn-start">▶️ Start Stream</button>
+            <button id="stopBtn" class="btn btn-stop" disabled>⏹️ Stop Stream</button>
+        </div>
+
+        <div id="status" class="status disconnected">
+            Enter ESP32 IP and click Start Stream
+        </div>
+
+        <div id="shareURL" class="share-url"></div>
+    </div>
+
+    <!-- Keep your original JavaScript unchanged -->
+    <script>
+        // Your existing JavaScript code here (unchanged)
+        class ESP32VideoStreamer {
+            constructor() {
+                this.video = document.getElementById('videoStream');
+                this.startBtn = document.getElementById('startBtn');
+                this.stopBtn = document.getElementById('stopBtn');
+                this.ipInput = document.getElementById('esp32IP');
+                this.saveBtn = document.getElementById('saveIP');
+                this.status = document.getElementById('status');
+                this.loading = document.getElementById('loadingIndicator');
+                this.shareURL = document.getElementById('shareURL');
+
+                this.esp32IP = '192.168.1.100';
+                this.streamUrl = '';
+                this.mediaSource = null;
+                this.sourceBuffer = null;
+                this.isStreaming = false;
+
+                this.init();
+            }
+
+            init() {
+                this.loadSavedIP();
+                this.bindEvents();
+                this.updateStatus('disconnected', 'Enter ESP32 IP address above');
+            }
+
+            loadSavedIP() {
+                const savedIP = localStorage.getItem('esp32_ip') || 
+                               new URLSearchParams(window.location.search).get('ip') ||
+                               '192.168.1.100';
+                this.ipInput.value = savedIP;
+                this.esp32IP = savedIP;
+            }
+
+            bindEvents() {
+                this.startBtn.addEventListener('click', () => this.startStream());
+                this.stopBtn.addEventListener('click', () => this.stopStream());
+                this.saveBtn.addEventListener('click', () => this.saveIP());
+                this.ipInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.saveIP();
+                });
+
+                this.video.addEventListener('loadedmetadata', () => {
+                    this.loading.style.display = 'none';
+                });
+
+                this.video.addEventListener('timeupdate', () => {
+                    if (this.isStreaming) {
+                        this.updateStatus('connected', `🟢 Live | ${Math.round(this.video.currentTime)}s`);
+                    }
+                });
+
+                this.video.addEventListener('stalled', () => {
+                    if (this.isStreaming) {
+                        setTimeout(() => this.fetchStreamData(this.streamUrl), 2000);
+                    }
+                });
+            }
+
+            saveIP() {
+                const ip = this.ipInput.value.trim();
+                if (this.validateIP(ip)) {
+                    this.esp32IP = ip;
+                    localStorage.setItem('esp32_ip', ip);
+                    this.updateShareURL();
+                    this.updateStatus('disconnected', `✅ IP saved: ${ip}`);
+                } else {
+                    alert('Invalid IP format! Use: 192.168.1.100');
+                }
+            }
+
+            validateIP(ip) {
+                const ipRegex = /^(\d{1,3}\.){3}\d{1,3}(:\d{1,5})?$/;
+                return ipRegex.test(ip);
+            }
+
+            updateShareURL() {
+                const url = `${window.location.origin}${window.location.pathname}?ip=${this.esp32IP}`;
+                this.shareURL.textContent = `📱 Share this link: ${url}`;
+                this.shareURL.style.display = 'block';
+            }
+
+            async startStream() {
+                this.saveIP();
+                this.streamUrl = `http://${this.esp32IP}/stream`;
+
+                try {
+                    this.startBtn.disabled = true;
+                    this.stopBtn.disabled = false;
+                    this.isStreaming = true;
+                    this.loading.style.display = 'block';
+                    this.updateStatus('buffering', `🔄 Connecting to ${this.esp32IP}...`);
+
+                    this.mediaSource = new MediaSource();
+                    this.video.src = URL.createObjectURL(this.mediaSource);
+
+                    this.mediaSource.addEventListener('sourceopen', () => {
+                        this.setupSourceBuffer();
+                    });
+
+                } catch (error) {
+                    console.error('Start error:', error);
+                    this.handleError('Connection failed. Check ESP32 IP and WiFi.');
+                }
+            }
+
+            setupSourceBuffer() {
+                const mimeCodec = 'video/mp4; codecs="mp4v.20.8"';
+                
+                try {
+                    this.sourceBuffer = this.mediaSource.addSourceBuffer(mimeCodec);
+                    this.sourceBuffer.mode = 'sequence';
+                    
+                    this.sourceBuffer.addEventListener('updateend', () => {
+                        if (!this.sourceBuffer.updating && this.mediaSource.readyState === 'open') {
+                            this.fetchStreamData();
+                        }
+                    });
+
+                    this.fetchStreamData();
+                    this.updateStatus('connected', `🟢 Live from ${this.esp32IP}`);
+
+                } catch (e) {
+                    console.error('SourceBuffer error:', e);
+                    this.handleError('Video codec not supported');
+                }
+            }
+
+            async fetchStreamData() {
+                if (!this.isStreaming) return;
+
+                try {
+                    const response = await fetch(this.streamUrl, { 
+                        cache: 'no-store'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const arrayBuffer = await response.arrayBuffer();
+                    if (this.sourceBuffer.updating || !this.mediaSource) return;
+
+                    this.sourceBuffer.appendBuffer(arrayBuffer);
+                } catch (error) {
+                    console.error('Stream fetch error:', error);
+                    if (this.isStreaming) {
+                        setTimeout(() => this.fetchStreamData(), 2000);
+                    }
+                }
+            }
+
+            stopStream() {
+                this.isStreaming = false;
+                this.resetControls();
+                
+                if (this.mediaSource && this.mediaSource.readyState === 'open') {
+                    this.mediaSource.endOfStream();
+                }
+                
+                this.video.src = '';
+                this.video.load();
+                this.updateStatus('disconnected', 'Stream stopped');
+            }
+
+            resetControls() {
+                this.startBtn.disabled = false;
+                this.stopBtn.disabled = true;
+                this.loading.style.display = 'none';
+            }
+
+            handleError(message) {
+                this.resetControls();
+                this.updateStatus('error', message);
+            }
+
+            updateStatus(type, message) {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            window.streamer = new ESP32VideoStreamer();
+        });
+    </script>
+</body>
+</html>
